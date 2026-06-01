@@ -1,4 +1,4 @@
-// noc_api_wrapper.sv - Unified user-facing API (noc_read / noc_write / noc_burst_*)
+// noc_api_wrapper.sv - Unified user-facing API with explicit source (master_id) + destination
 class noc_api_wrapper extends uvm_object;
 
     `uvm_object_utils(noc_api_wrapper)
@@ -13,7 +13,6 @@ class noc_api_wrapper extends uvm_object;
         m_initialized = 1'b0;
     endfunction
 
-    // Singleton access
     static function noc_api_wrapper get();
         if (m_inst == null) begin
             m_inst = new();
@@ -37,11 +36,16 @@ class noc_api_wrapper extends uvm_object;
 
     // =====================================================
     // Public API: noc_read
+    //   master_id  : source master (required, -1 = auto-select first accessible)
+    //   addr       : destination address (required)
+    //   slave_name : destination slave name hint (optional, speeds lookup)
     // =====================================================
     task noc_read(
         input  bit [63:0]    addr,
         output bit [1023:0]  data,
         input  bit [2:0]     size        = 3'b010,
+        input  int           master_id   = -1,
+        input  string        slave_name  = "",
         input  bit [2:0]     prot        = 3'b000,
         input  int           timeout_ns  = 10000
     );
@@ -51,19 +55,22 @@ class noc_api_wrapper extends uvm_object;
         check_init("noc_read");
 
         txn = noc_unified_transaction::type_id::create("noc_read_txn");
-        txn.direction = noc_unified_transaction::NOC_READ;
-        txn.addr      = addr;
-        txn.size      = size;
-        txn.prot      = prot;
-        txn.len       = 8'h0;
-        txn.burst     = noc_unified_transaction::INCR;
+        txn.direction  = noc_unified_transaction::NOC_READ;
+        txn.addr       = addr;
+        txn.size       = size;
+        txn.prot       = prot;
+        txn.len        = 8'h0;
+        txn.burst      = noc_unified_transaction::INCR;
+        txn.master_id  = master_id;
+        if (slave_name != "") txn.slave_name = slave_name;
         txn.start_time = $realtime;
 
         ok = execute_txn(txn, timeout_ns);
         data = txn.data;
 
         if (!ok) begin
-            `uvm_warning("NOC_API", $sformatf("noc_read(0x%0h) failed with resp=%s", addr, txn.resp_name()))
+            `uvm_warning("NOC_API", $sformatf("noc_read(M%0d->0x%0h) failed resp=%s",
+                txn.master_id, addr, txn.resp_name()))
         end
     endtask
 
@@ -74,6 +81,8 @@ class noc_api_wrapper extends uvm_object;
         input bit [63:0]    addr,
         input bit [1023:0]  data,
         input bit [2:0]     size        = 3'b010,
+        input int           master_id   = -1,
+        input string        slave_name  = "",
         input bit [127:0]   wstrb       = 128'hFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF,
         input bit [2:0]     prot        = 3'b000,
         input int           timeout_ns  = 10000
@@ -84,20 +93,23 @@ class noc_api_wrapper extends uvm_object;
         check_init("noc_write");
 
         txn = noc_unified_transaction::type_id::create("noc_write_txn");
-        txn.direction = noc_unified_transaction::NOC_WRITE;
-        txn.addr      = addr;
-        txn.data      = data;
-        txn.size      = size;
-        txn.wstrb     = wstrb;
-        txn.prot      = prot;
-        txn.len       = 8'h0;
-        txn.burst     = noc_unified_transaction::INCR;
+        txn.direction  = noc_unified_transaction::NOC_WRITE;
+        txn.addr       = addr;
+        txn.data       = data;
+        txn.size       = size;
+        txn.wstrb      = wstrb;
+        txn.prot       = prot;
+        txn.len        = 8'h0;
+        txn.burst      = noc_unified_transaction::INCR;
+        txn.master_id  = master_id;
+        if (slave_name != "") txn.slave_name = slave_name;
         txn.start_time = $realtime;
 
         ok = execute_txn(txn, timeout_ns);
 
         if (!ok) begin
-            `uvm_warning("NOC_API", $sformatf("noc_write(0x%0h) failed with resp=%s", addr, txn.resp_name()))
+            `uvm_warning("NOC_API", $sformatf("noc_write(M%0d->0x%0h) failed resp=%s",
+                txn.master_id, addr, txn.resp_name()))
         end
     endtask
 
@@ -109,6 +121,8 @@ class noc_api_wrapper extends uvm_object;
         output bit [1023:0]                 data[],
         input  bit [7:0]                    len,
         input  bit [2:0]                    size        = 3'b010,
+        input  int                          master_id   = -1,
+        input  string                       slave_name  = "",
         input  noc_unified_transaction::burst_type_e burst = noc_unified_transaction::INCR,
         input  bit [2:0]                    prot        = 3'b000,
         input  int                          timeout_ns  = 100000
@@ -119,24 +133,24 @@ class noc_api_wrapper extends uvm_object;
         check_init("noc_burst_read");
 
         txn = noc_unified_transaction::type_id::create("noc_burst_read_txn");
-        txn.direction = noc_unified_transaction::NOC_READ;
-        txn.addr      = addr;
-        txn.size      = size;
-        txn.len       = len;
-        txn.burst     = burst;
-        txn.prot      = prot;
+        txn.direction  = noc_unified_transaction::NOC_READ;
+        txn.addr       = addr;
+        txn.size       = size;
+        txn.len        = len;
+        txn.burst      = burst;
+        txn.prot       = prot;
+        txn.master_id  = master_id;
+        if (slave_name != "") txn.slave_name = slave_name;
         txn.start_time = $realtime;
 
         ok = execute_txn(txn, timeout_ns);
 
-        // In burst mode, data array contains all beats
         data = new[txn.len + 1];
-        // For simplicity, return the full data field (actual SVT would split by beat)
         data[0] = txn.data;
 
         if (!ok) begin
-            `uvm_warning("NOC_API", $sformatf("noc_burst_read(0x%0h, len=%0d) failed with resp=%s",
-                addr, len, txn.resp_name()))
+            `uvm_warning("NOC_API", $sformatf("noc_burst_read(M%0d->0x%0h, len=%0d) failed resp=%s",
+                txn.master_id, addr, len, txn.resp_name()))
         end
     endtask
 
@@ -148,6 +162,8 @@ class noc_api_wrapper extends uvm_object;
         input bit [1023:0]                  data[],
         input bit [7:0]                     len,
         input bit [2:0]                     size        = 3'b010,
+        input int                           master_id   = -1,
+        input string                        slave_name  = "",
         input bit [127:0]                   wstrb       = 128'hFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF,
         input noc_unified_transaction::burst_type_e burst = noc_unified_transaction::INCR,
         input bit [2:0]                     prot        = 3'b000,
@@ -159,40 +175,36 @@ class noc_api_wrapper extends uvm_object;
         check_init("noc_burst_write");
 
         txn = noc_unified_transaction::type_id::create("noc_burst_write_txn");
-        txn.direction = noc_unified_transaction::NOC_WRITE;
-        txn.addr      = addr;
+        txn.direction  = noc_unified_transaction::NOC_WRITE;
+        txn.addr       = addr;
         if (data.size() > 0) txn.data = data[0];
-        txn.size      = size;
-        txn.len       = len;
-        txn.wstrb     = wstrb;
-        txn.burst     = burst;
-        txn.prot      = prot;
+        txn.size       = size;
+        txn.len        = len;
+        txn.wstrb      = wstrb;
+        txn.burst      = burst;
+        txn.prot       = prot;
+        txn.master_id  = master_id;
+        if (slave_name != "") txn.slave_name = slave_name;
         txn.start_time = $realtime;
 
         ok = execute_txn(txn, timeout_ns);
 
         if (!ok) begin
-            `uvm_warning("NOC_API", $sformatf("noc_burst_write(0x%0h, len=%0d) failed with resp=%s",
-                addr, len, txn.resp_name()))
+            `uvm_warning("NOC_API", $sformatf("noc_burst_write(M%0d->0x%0h, len=%0d) failed resp=%s",
+                txn.master_id, addr, len, txn.resp_name()))
         end
     endtask
 
     // =====================================================
-    // Backdoor access via API
+    // Backdoor access
     // =====================================================
     task noc_backdoor_read(
         input  bit [63:0]     addr,
         output bit [31:0]     data,
         input  int            bd_type = `NOC_BACKDOOR_MEM
     );
-        noc_unified_transaction txn;
-        txn = noc_unified_transaction::type_id::create("noc_bd_read_txn");
-        txn.is_backdoor = 1'b1;
-        txn.addr        = addr;
-        txn.direction   = noc_unified_transaction::NOC_READ;
-        // Use backdoor access component
         `uvm_info("NOC_API", $sformatf("Backdoor read: 0x%0h", addr), UVM_MEDIUM)
-        data = 32'h0;  // placeholder
+        data = 32'h0;
     endtask
 
     task noc_backdoor_write(
@@ -200,12 +212,6 @@ class noc_api_wrapper extends uvm_object;
         input bit [31:0]     data,
         input int            bd_type = `NOC_BACKDOOR_MEM
     );
-        noc_unified_transaction txn;
-        txn = noc_unified_transaction::type_id::create("noc_bd_write_txn");
-        txn.is_backdoor = 1'b1;
-        txn.addr        = addr;
-        txn.data        = {992'h0, data};
-        txn.direction   = noc_unified_transaction::NOC_WRITE;
         `uvm_info("NOC_API", $sformatf("Backdoor write: 0x%0h = 0x%0h", addr, data), UVM_MEDIUM)
     endtask
 
@@ -214,20 +220,16 @@ class noc_api_wrapper extends uvm_object;
     // =====================================================
     function void check_init(string caller);
         if (!m_initialized) begin
-            `uvm_warning("NOC_API", $sformatf("%s: API not initialized. Call noc_api_wrapper::get().init() first.", caller))
+            `uvm_warning("NOC_API", $sformatf("%s: API not initialized.", caller))
         end
     endfunction
 
-    // Execute a transaction via virtual sequencer
     function bit execute_txn(noc_unified_transaction txn, int timeout_ns);
         if (m_vseqr != null) begin
-            // Route via virtual sequencer (which picks the right master)
             m_vseqr.execute_single(txn);
-            // Wait for completion
             wait(txn.end_time > 0);
             return (txn.resp == noc_unified_transaction::RESP_OKAY);
         end else begin
-            // Standalone mode: simulate simple response
             #(10ns);
             if (txn.direction == noc_unified_transaction::NOC_READ)
                 txn.data = txn.addr;

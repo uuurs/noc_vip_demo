@@ -76,6 +76,9 @@ class noc_env extends uvm_env;
     function void connect_phase(uvm_phase phase);
         super.connect_phase(phase);
 
+        // Resolve access matrix (allowed_slave_names -> allowed_slave_ids)
+        m_cfg.resolve_access_matrix();
+
         // Connect virtual sequencer to each agent's sequencer
         for (int i = 0; i < m_cfg.num_masters; i++) begin
             if (m_master_agents[i] != null && m_master_agents[i].get_sequencer() != null)

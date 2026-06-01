@@ -47,7 +47,10 @@ def generate_template(output):
         ],
         "masters": [
             {"name": "cpu", "id": 0, "protocol": "AXI4", "thread_id_width": 4, "active": True}
-        ]
+        ],
+        "access_matrix": {
+            "cpu": ["example_slave"]
+        }
     }
     json.dump(template, output, indent=2)
     output.write('\n')
@@ -106,10 +109,25 @@ def validate_config(config):
             errors.append(f"Slave '{name}': negative outstanding_capability")
 
     # Check masters
+    master_names = set()
     for i, master in enumerate(config.get("masters", [])):
         name = master.get("name", f"master[{i}]")
+        master_names.add(name)
         if master.get("protocol", "") not in valid_protos:
             warnings.append(f"Master '{name}': unknown protocol '{master.get('protocol', '')}'")
+
+    # Check access matrix
+    slave_names = {s["name"] for s in config.get("slaves", [])}
+    access_matrix = config.get("access_matrix", {})
+    if access_matrix:
+        for mst_name, allowed_slaves in access_matrix.items():
+            if mst_name not in master_names:
+                warnings.append(f"Access matrix: master '{mst_name}' not in masters list")
+            for slv_name in allowed_slaves:
+                if slv_name not in slave_names:
+                    errors.append(f"Access matrix: slave '{slv_name}' (referenced by '{mst_name}') not in slaves list")
+    else:
+        warnings.append("No access_matrix defined; all masters can access all slaves by default")
 
     return errors, warnings
 
@@ -137,6 +155,14 @@ def summary(config):
     print(f"  {'-'*20} {'-'*4} {'-'*12} {'-'*10}")
     for mst in config.get("masters", []):
         print(f"  {mst['name']:<20} {mst.get('id', '?'):<4} {mst.get('protocol', '?'):<12} {mst.get('thread_id_width', '?'):<10}")
+
+    access_matrix = config.get("access_matrix", {})
+    if access_matrix:
+        print(f"\nAccess Matrix:")
+        for mst_name, allowed in access_matrix.items():
+            print(f"  {mst_name:<20} -> [{', '.join(allowed)}]")
+    else:
+        print(f"\nAccess Matrix: NOT DEFINED (all masters can access all slaves)")
 
 
 def main():

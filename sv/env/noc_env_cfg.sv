@@ -125,6 +125,56 @@ class noc_env_cfg extends uvm_object;
         return null;
     endfunction
 
+    function noc_master_config find_master_by_name(string name);
+        for (int i = 0; i < num_masters; i++) begin
+            if (masters[i] != null && masters[i].name == name)
+                return masters[i];
+        end
+        return null;
+    endfunction
+
+    // =====================================================
+    // Access Matrix Lookup
+    // =====================================================
+
+    // Check master->slave access via access matrix
+    function bit check_access(int master_id, bit [63:0] addr);
+        noc_master_config mst = find_master_by_id(master_id);
+        if (mst == null) return 1'b0;
+        return mst.can_access_addr(addr, this);
+    endfunction
+
+    function bit check_access_by_name(int master_id, string slave_name);
+        noc_master_config mst = find_master_by_id(master_id);
+        if (mst == null) return 1'b0;
+        return mst.can_access_slave_name(slave_name);
+    endfunction
+
+    // Get all masters that can access a given slave (for conflict tests)
+    function void find_masters_for_slave(string slave_name, ref noc_master_config msts[$]);
+        msts.delete();
+        for (int i = 0; i < num_masters; i++) begin
+            if (masters[i] != null && masters[i].can_access_slave_name(slave_name))
+                msts.push_back(masters[i]);
+        end
+    endfunction
+
+    // Get all slaves accessible by a given master (for traversal tests)
+    function void find_slaves_for_master(int master_id, ref noc_slave_config slvs[$]);
+        slvs.delete();
+        noc_master_config mst = find_master_by_id(master_id);
+        if (mst == null) return;
+        mst.get_accessible_slaves(this, slvs);
+    endfunction
+
+    // Resolve all masters' slave name lists to ids (call after config loaded)
+    function void resolve_access_matrix();
+        for (int i = 0; i < num_masters; i++) begin
+            if (masters[i] != null)
+                masters[i].resolve_slave_ids(this);
+        end
+    endfunction
+
     // Get list of valid address ranges for constraint generation
     function void get_valid_addr_ranges(ref bit [63:0] ranges[$][$]);
         for (int i = 0; i < num_slaves; i++) begin

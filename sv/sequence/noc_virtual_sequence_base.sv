@@ -185,21 +185,133 @@ class noc_outstanding_test_sequence extends noc_virtual_sequence_base;
     endfunction
 
     task body();
+        noc_api_wrapper api = noc_api_wrapper::get();
         `uvm_info("NOC_OUTSTANDING", "Starting outstanding test...", UVM_LOW)
 
         for (int i = 0; i < m_cfg.num_slaves; i++) begin
             noc_slave_config slv = m_cfg.slaves[i];
             if (slv == null || slv.outstanding_capability == 0) continue;
 
-            // Generate parallel reads up to max outstanding
+            noc_master_config msts[$];
+            m_cfg.find_masters_for_slave(slv.name, msts);
+            if (msts.size() == 0) continue;
+
+            int mid = msts[0].master_id;
+            bit [1023:0] rdata;
             for (int j = 0; j < slv.outstanding_capability + 2; j++) begin
-                noc_read_sequence seq = noc_read_sequence::type_id::create();
-                seq.target_addr = slv.base_addr + (j * 64);
-                start_on_master(0, seq);
-                `uvm_info("NOC_OUTSTANDING", $sformatf("[%s] Outstanding #%0d", slv.name, j), UVM_MEDIUM)
+                api.noc_read(.addr(slv.base_addr + (j * 64)), .data(rdata), .size(3), .master_id(mid));
+                `uvm_info("NOC_OUTSTANDING", $sformatf("[%s] M[%0d] Outstanding #%0d", slv.name, mid, j), UVM_MEDIUM)
             end
         end
 
         `uvm_info("NOC_OUTSTANDING", "Outstanding test complete", UVM_LOW)
+    endtask
+endclass
+
+// =====================================================
+// Master Traverse Test: one master visits all slaves it can access
+// =====================================================
+class noc_master_traverse_sequence extends noc_virtual_sequence_base;
+    `uvm_object_utils(noc_master_traverse_sequence)
+
+    int m_master_id;
+
+    function new(string name = "noc_master_traverse_sequence");
+        super.new(name);
+        m_master_id = 0;
+    endfunction
+
+    task body();
+        noc_api_wrapper api = noc_api_wrapper::get();
+        noc_slave_config slvs[$];
+        bit [1023:0] rdata;
+
+        m_cfg.find_slaves_for_master(m_master_id, slvs);
+        noc_master_config mst = m_cfg.find_master_by_id(m_master_id);
+        string m_name = (mst != null) ? mst.name : $sformatf("M%0d", m_master_id);
+
+        `uvm_info("NOC_MASTER_TRAVERSE", $sformatf("Master[%0d] '%s' traversing %0d slaves", m_master_id, m_name, slvs.size()), UVM_LOW)
+
+        foreach (slvs[i]) begin
+            // Write then read
+            api.noc_write(.addr(slvs[i].base_addr), .data(1024'hFEED_FACE), .size(2), .master_id(m_master_id));
+            api.noc_read(.addr(slvs[i].base_addr), .data(rdata), .size(2), .master_id(m_master_id));
+            `uvm_info("NOC_MASTER_TRAVERSE", $sformatf("  M[%0d]%s -> %s [0x%0h-0x%0h] OK",
+                m_master_id, m_name, slvs[i].name, slvs[i].base_addr, slvs[i].get_end_addr()), UVM_MEDIUM)
+        end
+
+        `uvm_info("NOC_MASTER_TRAVERSE", "Master traverse test complete", UVM_LOW)
+    endtask
+endclass
+
+// =====================================================
+// Conflict Test: all accessible masters access one slave concurrently
+// =====================================================
+class noc_conflict_test_sequence extends noc_virtual_sequence_base;
+    `uvm_object_utils(noc_conflict_test_sequence)
+
+    int m_slave_id;
+
+    function new(string name = "noc_conflict_test_sequence");
+        super.new(name);
+        m_slave_id = 0;
+    endfunction
+
+    task body();
+        noc_slave_config slv = m_cfg.find_slave_by_id(m_slave_id);
+        noc_master_config msts[$];
+        noc_api_wrapper api = noc_api_wrapper::get();
+        bit [1023:0] rdata;
+
+        if (slv == null) begin
+            `uvm_error("NOC_CONFLICT", $sformatf("Slave[%0d] not found", m_slave_id))
+            return;
+        end
+
+        m_cfg.find_masters_for_slave(slv.name, msts);
+        `uvm_info("NOC_CONFLICT", $sformatf("Conflict test: %0d masters -> slave '%s'", msts.size(), slv.name), UVM_LOW)
+
+        if (msts.size() == 0) begin
+            `uvm_info("NOC_CONFLICT", $sformatf("No masters can access slave '%s'", slv.name), UVM_MEDIUM)
+            return;
+        end
+
+        // Round 1: all masters write to distinct addresses within the same slave
+        `uvm_info("NOC_CONFLICT", "  Round 1: Concurrent writes", UVM_MEDIUM)
+        fork
+            foreach (msts[i]) begin
+                automatic noc_master_config m = msts[i];
+                automatic bit [63:0] taddr = slv.base_addr + (m.master_id * 128);
+                api.noc_write(.addr(taddr), .data({960'h0, 64'h(m.master_id)}), .size(3), .master_id(m.master_id));
+                `uvm_info("NOC_CONFLICT", $sformatf("    M[%0d]%s write to 0x%0h", m.master_id, m.name, taddr), UVM_MEDIUM)
+            end
+        join
+
+        // Round 2: all masters read back concurrently
+        `uvm_info("NOC_CONFLICT", "  Round 2: Concurrent reads", UVM_MEDIUM)
+        fork
+            foreach (msts[i]) begin
+                automatic noc_master_config m = msts[i];
+                automatic bit [63:0] taddr = slv.base_addr + (m.master_id * 128);
+                api.noc_read(.addr(taddr), .data(rdata), .size(3), .master_id(m.master_id));
+                `uvm_info("NOC_CONFLICT", $sformatf("    M[%0d]%s read from 0x%0h", m.master_id, m.name, taddr), UVM_MEDIUM)
+            end
+        join
+
+        // Round 3: mixed R/W to same address range
+        `uvm_info("NOC_CONFLICT", "  Round 3: Mixed R/W", UVM_MEDIUM)
+        fork
+            foreach (msts[i]) begin
+                automatic noc_master_config m = msts[i];
+                automatic bit [63:0] taddr = slv.base_addr + (m.master_id * 128);
+                if (m.master_id % 2 == 0) begin
+                    api.noc_write(.addr(taddr), .data(1024'h0), .size(3), .master_id(m.master_id));
+                end else begin
+                    api.noc_read(.addr(taddr), .data(rdata), .size(3), .master_id(m.master_id));
+                end
+            end
+        join
+
+        `uvm_info("NOC_CONFLICT", "Conflict test complete", UVM_LOW)
     endtask
 endclass

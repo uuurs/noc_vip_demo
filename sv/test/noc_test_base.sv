@@ -108,11 +108,17 @@ class noc_smoke_vseq extends noc_virtual_sequence_base;
             noc_slave_config slv = m_cfg.slaves[i];
             if (slv == null) continue;
 
-            api.noc_write(.addr(slv.base_addr), .data(1024'hCAFE_BABE_DEAD_BEEF), .size(3));
-            `uvm_info("NOC_SMOKE", $sformatf("[%s] Write: 0x%0h", slv.name, slv.base_addr), UVM_MEDIUM)
+            // Find first master that can access this slave
+            noc_master_config msts[$];
+            m_cfg.find_masters_for_slave(slv.name, msts);
+            if (msts.size() == 0) continue;
+            int mid = msts[0].master_id;
 
-            api.noc_read(.addr(slv.base_addr), .data(rdata), .size(3));
-            `uvm_info("NOC_SMOKE", $sformatf("[%s] Read:  0x%0h = 0x%0h", slv.name, slv.base_addr, rdata), UVM_MEDIUM)
+            api.noc_write(.addr(slv.base_addr), .data(1024'hCAFE_BABE_DEAD_BEEF), .size(3), .master_id(mid));
+            `uvm_info("NOC_SMOKE", $sformatf("[%s] M[%0d]%s Write: 0x%0h", slv.name, mid, msts[0].name, slv.base_addr), UVM_MEDIUM)
+
+            api.noc_read(.addr(slv.base_addr), .data(rdata), .size(3), .master_id(mid));
+            `uvm_info("NOC_SMOKE", $sformatf("[%s] M[%0d]%s Read:  0x%0h = 0x%0h", slv.name, mid, msts[0].name, slv.base_addr, rdata), UVM_MEDIUM)
         end
 
         `uvm_info("NOC_SMOKE", "Smoke test PASSED", UVM_LOW)
@@ -179,6 +185,60 @@ class noc_random_traffic_test extends noc_test_base;
         noc_virtual_sequence_base vseq = noc_virtual_sequence_base::type_id::create("vseq");
         phase.raise_objection(this);
         vseq.parallel_traffic(.num_txns_per_master(100));
+        phase.drop_objection(this);
+    endtask
+endclass
+
+// =====================================================
+// Master Traverse Test: one master visits all its accessible slaves
+// =====================================================
+class noc_master_traverse_test extends noc_test_base;
+    `uvm_component_utils(noc_master_traverse_test)
+
+    int m_traverse_master_id;
+
+    function new(string name = "noc_master_traverse_test", uvm_component parent);
+        super.new(name, parent);
+        m_traverse_master_id = 1;  // default: DMA engine traverses all slaves
+    endfunction
+
+    function void build_phase(uvm_phase phase);
+        super.build_phase(phase);
+        void'(uvm_config_db #(int)::get(this, "", "traverse_master_id", m_traverse_master_id));
+    endfunction
+
+    task main_phase(uvm_phase phase);
+        noc_master_traverse_sequence seq = noc_master_traverse_sequence::type_id::create("seq");
+        seq.m_master_id = m_traverse_master_id;
+        phase.raise_objection(this);
+        seq.start(m_env.m_vseqr);
+        phase.drop_objection(this);
+    endtask
+endclass
+
+// =====================================================
+// Conflict Test: multiple masters access one slave concurrently
+// =====================================================
+class noc_conflict_test extends noc_test_base;
+    `uvm_component_utils(noc_conflict_test)
+
+    int m_conflict_slave_id;
+
+    function new(string name = "noc_conflict_test", uvm_component parent);
+        super.new(name, parent);
+        m_conflict_slave_id = 0;  // default: target first slave
+    endfunction
+
+    function void build_phase(uvm_phase phase);
+        super.build_phase(phase);
+        void'(uvm_config_db #(int)::get(this, "", "conflict_slave_id", m_conflict_slave_id));
+    endfunction
+
+    task main_phase(uvm_phase phase);
+        noc_conflict_test_sequence seq = noc_conflict_test_sequence::type_id::create("seq");
+        seq.m_slave_id = m_conflict_slave_id;
+        phase.raise_objection(this);
+        seq.start(m_env.m_vseqr);
         phase.drop_objection(this);
     endtask
 endclass

@@ -287,21 +287,37 @@ def generate_random_traffic_test(config):
     )
     sv += '\n        `uvm_info("NOC_AUTO", "Starting auto-generated random traffic test...", UVM_LOW)\n\n'
 
-    # Generate random transaction for each slave from each master
-    sv += '        // Random traffic across all masters and slaves\n'
+    # Build access matrix lookup: slave_name -> [master_ids that can access]
+    access_matrix = config.get("access_matrix", {})
+    slave_to_masters = {}
+    for slave in config["slaves"]:
+        sname = slave["name"]
+        slave_to_masters[sname] = []
+        for master in config.get("masters", []):
+            mname = master["name"]
+            if sname in access_matrix.get(mname, []):
+                slave_to_masters[sname].append(master["id"])
+
+    # Generate random traffic respecting access matrix
+    sv += '        // Random traffic respecting access matrix\n'
     sv += '        for (int iter = 0; iter < 100; iter++) begin\n'
-    sv += '            // Pick random slave from config\n'
     sv += '            case ($urandom_range(0, {}))\n'.format(len(config["slaves"]) - 1)
 
     for i, slave in enumerate(config["slaves"]):
         name = slave["name"]
         base = parse_addr(slave["base_addr"])
         limit = parse_addr(slave["addr_range"])
+        allowed_masters = slave_to_masters.get(name, [])
         sv += f'                {i}: begin  // {name}\n'
+        if allowed_masters:
+            mid_list = ", ".join(str(m) for m in allowed_masters)
+            sv += f'                    int mid = $urandom_range(0, {len(allowed_masters)-1}) ? {mid_list} : {allowed_masters[0]};  // pick valid master\n'
+        else:
+            sv += f'                    int mid = 0;  // no access_matrix, fallback\n'
         sv += f'                    if ($urandom_range(0, 1))\n'
-        sv += f'                        api.noc_read(.addr(64\'h{base:08X} + ($urandom_range(0, {limit-16}))), .data(rdata), .size($urandom_range(0, {slave.get("max_size", 3)})));\n'
+        sv += f'                        api.noc_read(.addr(64\'h{base:08X} + ($urandom_range(0, {limit-16}))), .data(rdata), .size($urandom_range(0, {slave.get("max_size", 3)})), .master_id(mid));\n'
         sv += f'                    else\n'
-        sv += f'                        api.noc_write(.addr(64\'h{base:08X} + ($urandom_range(0, {limit-16}))), .data($urandom() & 1024\'hFFFF_FFFF), .size($urandom_range(0, {slave.get("max_size", 3)})));\n'
+        sv += f'                        api.noc_write(.addr(64\'h{base:08X} + ($urandom_range(0, {limit-16}))), .data($urandom() & 1024\'hFFFF_FFFF), .size($urandom_range(0, {slave.get("max_size", 3)})), .master_id(mid));\n'
         sv += f'                end\n'
     sv += '            endcase\n'
     sv += '        end\n\n'
@@ -310,12 +326,119 @@ def generate_random_traffic_test(config):
     return sv
 
 
+def generate_master_traverse_test(config):
+    """Generate master traverse test: one master visits all slaves it can access."""
+    masters_cfg = config.get("masters", [])
+    access_matrix = config.get("access_matrix", {})
+
+    sv = HEADER.format(
+        timestamp=datetime.now().isoformat(),
+        config_file=config.get("_source", "noc_slave_config.json"),
+        test_type="Master Traverse",
+        test_name="master_traverse",
+        config_json_path="../config/noc_slave_config.json"
+    )
+    sv += '\n        `uvm_info("NOC_AUTO", "Starting auto-generated master traverse test...", UVM_LOW)\n\n'
+
+    for master in masters_cfg:
+        mid = master["id"]
+        mname = master["name"]
+        allowed = access_matrix.get(mname, [])
+        if not allowed:
+            sv += f'        // Master[{mid}] "{mname}": no slaves in access matrix, skipping\n\n'
+            continue
+
+        sv += f'        // === Master[{mid}] "{mname}" traversing {len(allowed)} slaves ===\n'
+        sv += f'        begin\n'
+        sv += f'            noc_slave_config slvs[$];\n'
+        sv += f'            m_cfg.find_slaves_for_master({mid}, slvs);\n'
+        sv += f'            foreach (slvs[i]) begin\n'
+        sv += f'                api.noc_write(.addr(slvs[i].base_addr), .data(1024\'hFEED_FACE), .size(2), .master_id({mid}));\n'
+        sv += f'                api.noc_read(.addr(slvs[i].base_addr), .data(rdata), .size(2), .master_id({mid}));\n'
+        sv += f'                `uvm_info("NOC_AUTO", $sformatf("M[{mid}]%s -> %s 0x%%0h", slvs[i].name, slvs[i].base_addr), UVM_MEDIUM)\n'
+        sv += f'            end\n'
+        sv += f'        end\n\n'
+
+    sv += FOOTER.format(test_type="Master Traverse")
+    return sv
+
+
+def generate_conflict_test(config):
+    """Generate conflict test: all accessible masters access one slave concurrently."""
+    slaves_cfg = config.get("slaves", [])
+    masters_cfg = config.get("masters", [])
+    access_matrix = config.get("access_matrix", {})
+
+    sv = HEADER.format(
+        timestamp=datetime.now().isoformat(),
+        config_file=config.get("_source", "noc_slave_config.json"),
+        test_type="Conflict (Read/Write)",
+        test_name="conflict",
+        config_json_path="../config/noc_slave_config.json"
+    )
+    sv += '\n        `uvm_info("NOC_AUTO", "Starting auto-generated conflict test...", UVM_LOW)\n\n'
+
+    for slave in slaves_cfg:
+        sname = slave["name"]
+        base = parse_addr(slave["base_addr"])
+        limit = parse_addr(slave["addr_range"])
+
+        # Find masters that can access this slave
+        eligible = []
+        for master in masters_cfg:
+            mname = master["name"]
+            if sname in access_matrix.get(mname, []):
+                eligible.append(master)
+
+        if len(eligible) <= 1:
+            sv += f'        // Slave "{sname}": only {len(eligible)} master(s) can access, skipping conflict test\n\n'
+            continue
+
+        sv += f'        // === Slave "{sname}" conflict: {len(eligible)} masters ===\n'
+        sv += f'        begin\n'
+        sv += f'            `uvm_info("NOC_AUTO", "[{sname}] {len(eligible)} masters concurrent access", UVM_MEDIUM)\n'
+        sv += f'            fork\n'
+
+        for i, master in enumerate(eligible):
+            mid = master["id"]
+            mname = master["name"]
+            taddr = base + (mid * 128)
+            if taddr >= base + limit:
+                taddr = base + (mid * 16)  # fallback in tight ranges
+            sv += f'                begin  // M[{mid}] "{mname}"\n'
+            sv += f'                    api.noc_write(.addr(64\'h{taddr:08X}), .data({{960\'h0, 64\'h({mid})}}), .size(3), .master_id({mid}));\n'
+            sv += f'                    api.noc_read(.addr(64\'h{taddr:08X}), .data(rdata), .size(3), .master_id({mid}));\n'
+            sv += f'                end\n'
+
+        sv += f'            join\n'
+        sv += f'        end\n\n'
+
+        # Round 2: mixed read/write to same region
+        sv += f'        // Mixed R/W to same slave\n'
+        sv += f'        fork\n'
+        for i, master in enumerate(eligible):
+            mid = master["id"]
+            taddr = base + (mid * 128)
+            if taddr >= base + limit:
+                taddr = base + (mid * 16)
+            if mid % 2 == 0:
+                sv += f'            api.noc_write(.addr(64\'h{taddr:08X}), .data(1024\'h0), .size(3), .master_id({mid}));  // M[{mid}]\n'
+            else:
+                sv += f'            api.noc_read(.addr(64\'h{taddr:08X}), .data(rdata), .size(3), .master_id({mid}));  // M[{mid}]\n'
+        sv += f'        join\n\n'
+
+    sv += FOOTER.format(test_type="Conflict (Read/Write)")
+    return sv
+
+
 TEST_GENERATORS = {
-    "legality":       generate_legality_test,
-    "boundary":       generate_boundary_test,
-    "burst":          generate_burst_test,
-    "outstanding":    generate_outstanding_test,
-    "random_traffic": generate_random_traffic_test,
+    "legality":         generate_legality_test,
+    "boundary":         generate_boundary_test,
+    "burst":            generate_burst_test,
+    "outstanding":      generate_outstanding_test,
+    "random_traffic":   generate_random_traffic_test,
+    "master_traverse":  generate_master_traverse_test,
+    "conflict":         generate_conflict_test,
 }
 
 

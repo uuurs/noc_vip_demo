@@ -116,5 +116,11 @@
     {"name": "dma_engine",   "id": 1, "protocol": "AXI4",    "thread_id_width": 8, "active": true},
     {"name": "debug_apb",    "id": 2, "protocol": "APB4",    "thread_id_width": 0, "active": true},
     {"name": "display_ahb",  "id": 3, "protocol": "AHBLite", "thread_id_width": 0, "active": true}
-  ]
+  ],
+  "access_matrix": {
+    "cpu_cluster0": ["ddr_ctrl", "sram_256k", "gpio", "uart0", "spi_flash"],
+    "dma_engine":   ["ddr_ctrl", "sram_256k"],
+    "debug_apb":    ["gpio", "uart0"],
+    "display_ahb":  ["ddr_ctrl", "spi_flash"]
+  }
 }
