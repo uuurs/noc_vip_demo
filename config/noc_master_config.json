@@ -1,0 +1,35 @@
+{
+  "description": "Master configuration - specifies which masters can access which slaves",
+  "access_matrix": {
+    "cpu_cluster0": ["ddr_ctrl", "sram_256k", "gpio", "uart0", "spi_flash"],
+    "dma_engine":   ["ddr_ctrl", "sram_256k"],
+    "debug_apb":    ["gpio", "uart0"],
+    "display_ahb":  ["ddr_ctrl", "spi_flash"]
+  },
+  "master_properties": {
+    "cpu_cluster0": {
+      "outstanding_capability": 16,
+      "reordering_depth": 8,
+      "max_read_burst": 255,
+      "max_write_burst": 255
+    },
+    "dma_engine": {
+      "outstanding_capability": 32,
+      "reordering_depth": 16,
+      "max_read_burst": 255,
+      "max_write_burst": 255
+    },
+    "debug_apb": {
+      "outstanding_capability": 1,
+      "reordering_depth": 0,
+      "max_read_burst": 0,
+      "max_write_burst": 0
+    },
+    "display_ahb": {
+      "outstanding_capability": 4,
+      "reordering_depth": 0,
+      "max_read_burst": 15,
+      "max_write_burst": 7
+    }
+  }
+}

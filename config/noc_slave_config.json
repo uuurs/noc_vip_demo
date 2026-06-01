@@ -1,0 +1,120 @@
+{
+  "noc_config": {
+    "name": "example_soc_noc",
+    "version": "1.0",
+    "description": "Example NOC configuration for a typical SoC",
+    "num_masters": 4,
+    "data_width": 64,
+    "addr_width": 40,
+    "clk_period_ps": 1000
+  },
+  "slaves": [
+    {
+      "name": "ddr_ctrl",
+      "base_addr": "0x80000000",
+      "addr_range": "0x40000000",
+      "supported_protocols": ["AXI4"],
+      "supported_burst": ["FIXED", "INCR", "WRAP"],
+      "max_len": 255,
+      "max_size": 7,
+      "outstanding_capability": 16,
+      "alignment_required": true,
+      "interleaving_supported": true,
+      "write_enable": true,
+      "read_latency_min": 10,
+      "read_latency_max": 50,
+      "write_latency_min": 5,
+      "write_latency_max": 30,
+      "special_regions": [
+        {"name": "ddr_config_regs", "base": "0x80000000", "range": "0x1000", "access": "RW"},
+        {"name": "ddr_phy_regs",    "base": "0x80001000", "range": "0x1000", "access": "RW"}
+      ]
+    },
+    {
+      "name": "sram_256k",
+      "base_addr": "0xC0000000",
+      "addr_range": "0x00040000",
+      "supported_protocols": ["AXI4", "AHBLite"],
+      "supported_burst": ["INCR"],
+      "max_len": 15,
+      "max_size": 3,
+      "outstanding_capability": 4,
+      "alignment_required": true,
+      "interleaving_supported": false,
+      "write_enable": true,
+      "read_latency_min": 2,
+      "read_latency_max": 5,
+      "write_latency_min": 1,
+      "write_latency_max": 3,
+      "special_regions": []
+    },
+    {
+      "name": "gpio",
+      "base_addr": "0xF0000000",
+      "addr_range": "0x00001000",
+      "supported_protocols": ["APB4"],
+      "supported_burst": ["FIXED"],
+      "max_len": 0,
+      "max_size": 2,
+      "outstanding_capability": 1,
+      "alignment_required": true,
+      "interleaving_supported": false,
+      "write_enable": true,
+      "read_latency_min": 1,
+      "read_latency_max": 2,
+      "write_latency_min": 1,
+      "write_latency_max": 2,
+      "special_regions": [
+        {"name": "gpio_data",   "base": "0xF0000000", "range": "0x10", "access": "RW"},
+        {"name": "gpio_dir",    "base": "0xF0000010", "range": "0x10", "access": "RW"},
+        {"name": "gpio_int_en", "base": "0xF0000020", "range": "0x10", "access": "RW"}
+      ]
+    },
+    {
+      "name": "uart0",
+      "base_addr": "0xF0001000",
+      "addr_range": "0x00001000",
+      "supported_protocols": ["APB4", "AXI4Lite"],
+      "supported_burst": ["FIXED"],
+      "max_len": 0,
+      "max_size": 2,
+      "outstanding_capability": 1,
+      "alignment_required": true,
+      "interleaving_supported": false,
+      "write_enable": true,
+      "read_latency_min": 2,
+      "read_latency_max": 4,
+      "write_latency_min": 2,
+      "write_latency_max": 4,
+      "special_regions": [
+        {"name": "uart_rx", "base": "0xF0001000", "range": "0x4", "access": "R"},
+        {"name": "uart_tx", "base": "0xF0001004", "range": "0x4", "access": "W"},
+        {"name": "uart_ctrl", "base": "0xF0001008", "range": "0x4", "access": "RW"}
+      ]
+    },
+    {
+      "name": "spi_flash",
+      "base_addr": "0xE0000000",
+      "addr_range": "0x01000000",
+      "supported_protocols": ["AHBLite", "AvalonMM"],
+      "supported_burst": ["INCR"],
+      "max_len": 7,
+      "max_size": 2,
+      "outstanding_capability": 2,
+      "alignment_required": true,
+      "interleaving_supported": false,
+      "write_enable": true,
+      "read_latency_min": 5,
+      "read_latency_max": 20,
+      "write_latency_min": 10,
+      "write_latency_max": 50,
+      "special_regions": []
+    }
+  ],
+  "masters": [
+    {"name": "cpu_cluster0", "id": 0, "protocol": "AXI4",    "thread_id_width": 4, "active": true},
+    {"name": "dma_engine",   "id": 1, "protocol": "AXI4",    "thread_id_width": 8, "active": true},
+    {"name": "debug_apb",    "id": 2, "protocol": "APB4",    "thread_id_width": 0, "active": true},
+    {"name": "display_ahb",  "id": 3, "protocol": "AHBLite", "thread_id_width": 0, "active": true}
+  ]
+}

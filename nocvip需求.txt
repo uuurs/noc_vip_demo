@@ -1,0 +1,139 @@
+Role:
+你是一名拥有15年以上SoC验证经验的Principal Verification Engineer，熟悉UVM、SVT VIP、AXI/AHB/APB/Avalon协议以及大型NOC验证平台开发。
+
+Task:
+设计并生成一套可复用的NOC Verification Access Library。
+
+技术要求：
+
+1. 使用SystemVerilog + UVM实现
+
+2. 底层基于Synopsys SVT VIP
+
+3. 支持协议：
+
+* AXI4
+* AXI4-Lite
+* AHB-Lite
+* APB4
+* Avalon-MM
+
+4. 提供统一访问API：
+
+* noc_read()
+* noc_write()
+* noc_burst_read()
+* noc_burst_write()
+
+5. 支持Transaction参数配置：
+
+* addr
+* data
+* burst
+* len
+* size
+* id
+* qos
+* cache
+* prot
+* lock
+* user
+
+通过constraint override方式实现
+
+6. 支持多Master多Slave场景
+
+7. 支持Virtual Sequence统一调度
+
+8. 支持Backdoor Access：
+
+* UVM RAL Backdoor
+* HDL Backdoor
+* Memory Backdoor
+
+9. 生成Protocol Checker：
+
+* AXI Checker
+* AHB Checker
+* APB Checker
+
+违规时输出完整Violation Report
+
+10. 生成Transaction Logger
+
+输出CSV与JSON日志
+
+记录：
+
+* timestamp
+* master
+* slave
+* addr
+* data
+* resp
+* latency
+
+11. 生成Coverage Model
+
+包含：
+
+* burst
+* len
+* size
+* resp
+* slave
+* outstanding
+
+以及Cross Coverage
+
+12. 支持Error Injection：
+
+* illegal address
+* illegal burst
+* timeout
+* DECERR
+* SLVERR
+* boundary violation
+
+13. 支持Performance Monitor：
+
+* latency
+* throughput
+* bandwidth
+* outstanding depth
+
+14. 支持JSON/Excel配置数据库
+
+描述每个NOC Slave：
+
+* name
+* base address
+* address range
+* supported burst
+* max len
+* max size
+* outstanding capability
+
+15. 根据配置数据库自动生成：
+
+* legality test
+* boundary test
+* burst test
+* outstanding test
+* random traffic test
+
+输出内容：
+
+1. 整体架构设计文档
+2. class hierarchy
+3. directory tree
+4. 核心代码框架
+5. sequence示例
+6. checker示例
+7. coverage示例
+8. 自动用例生成框架
+9. JSON配置格式定义
+10. 开发路线图
+
+
+Questa Sim 安装目录C:\questasim64_2021.1\win64
